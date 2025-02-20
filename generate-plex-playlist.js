@@ -55,7 +55,7 @@ async function generatePlexPlaylist() {
 async function generateFallbackPlaylist() {
   console.log('Fetching fallback from iptv-org');
   try {
-    const response = await axios.get('https://raw.githubusercontent.com/iptv-org/iptv/master/streams/us_plex.m3u');
+    const response = await axios.get('https://raw.githubusercontent.com/matthuisman/i.mjh.nz/refs/heads/master/Plex/.channels.json.gz');
     if (response.status === 200) {
       const m3u = response.data;
       console.log('Fallback M3U fetched, channels found:', (m3u.match(/#EXTINF:/g) || []).length);
