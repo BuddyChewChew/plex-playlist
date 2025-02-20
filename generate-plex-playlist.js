@@ -1,98 +1,55 @@
 const axios = require('axios');
 const fs = require('fs').promises;
+const zlib = require('zlib'); // For decompressing gzip
 
-async function getPlexToken(region = 'us') {
-  const headers = {
-    'Accept': 'application/json',
-    'Origin': 'https://app.plex.tv',
-    'Referer': 'https://app.plex.tv/',
-    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36',
-    'X-Plex-Product': 'Plex Web',
-    'X-Plex-Version': '4.126.1',
-    'X-Plex-Client-Identifier': Math.random().toString(36).substring(2),
-  };
-
-  const xForwardedForMap = {
-    'uk': '178.238.11.6',
-    'us': '185.236.200.172',
-    'ca': '192.206.151.131',
-  };
-
-  if (xForwardedForMap[region]) {
-    headers['X-Forwarded-For'] = xForwardedForMap[region];
-  }
-
+async function fetchAndDecompress(url) {
+  console.log(`Fetching and decompressing: ${url}`);
   try {
-    const response = await axios.post('https://clients.plex.tv/api/v2/users/anonymous', null, { headers });
-    if (response.status === 200 || response.status === 201) {
-      console.log('Token retrieved:', response.data.authToken.substring(0, 5) + '...');
-      return response.data.authToken;
+    const response = await axios.get(url, { responseType: 'arraybuffer' });
+    if (response.status === 200) {
+      const decompressed = zlib.gunzipSync(Buffer.from(response.data)).toString('utf8');
+      return JSON.parse(decompressed);
     } else {
-      console.error('Token fetch failed:', response.status, response.data);
+      console.error(`Fetch failed: ${response.status}`);
       return null;
     }
   } catch (error) {
-    console.error('Error fetching token:', error.message);
+    console.error(`Error fetching/decompressing: ${error.message}`);
     return null;
   }
 }
 
-async function scrapePlexChannels(region) {
-  const plexToken = await getPlexToken(region);
-  if (!plexToken) {
-    console.log('Falling back to iptv-org due to token failure');
+async function generatePlexPlaylist() {
+  const channelsUrl = 'https://raw.githubusercontent.com/matthuisman/i.mjh.nz/refs/heads/master/Plex/.channels.json.gz';
+  const channelsData = await fetchAndDecompress(channelsUrl);
+
+  if (!channelsData || !channelsData.channels) {
+    console.log('No valid channels data; falling back to iptv-org');
     return await generateFallbackPlaylist();
   }
 
-  try {
-    const channelsUrl = `https://tv.plex.tv/api/v2/livetv/channels?X-Plex-Token=${plexToken}`;
-    const response = await axios.get(channelsUrl, {
-      headers: {
-        'Accept': 'application/json',
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36',
-        'X-Plex-Client-Identifier': Math.random().toString(36).substring(2),
-        'X-Plex-Product': 'Plex Web',
-        'X-Plex-Version': '4.126.1'
-      }
-    });
+  const channels = channelsData.channels;
+  console.log(`Found ${Object.keys(channels).length} channels`);
 
-    if (response.status !== 200) {
-      console.log('API returned non-200:', response.status, response.data);
-      return await generateFallbackPlaylist();
+  let m3u = '#EXTM3U\n'; // No url-tvg for simplicity; add later if needed
+  for (const channelId in channels) {
+    const channel = channels[channelId];
+    const name = channel.name || `Plex Channel ${channelId}`;
+    const tvgId = channelId;
+    const logo = channel.logo || 'https://provider-static.plex.tv/static/images/plex-logo.png';
+    const streamUrl = channel.url || null;
+
+    if (streamUrl) {
+      m3u += `#EXTINF:-1 tvg-id="${tvgId}" tvg-name="${name}" tvg-logo="${logo}",${name}\n${streamUrl}\n`;
     }
+  }
 
-    const channels = response.data.data || response.data.channels || [];
-    console.log('Found channels:', channels.length);
-
-    if (channels.length === 0) {
-      console.log('No channels found; using fallback');
-      return await generateFallbackPlaylist();
-    }
-
-    let m3u = `#EXTM3U url-tvg="https://epg.provider.plex.tv/grid?type=channel&X-Plex-Token=${plexToken}"\n`;
-    channels.forEach((channel, index) => {
-      const name = channel.title || channel.name || `Plex Channel ${index + 1}`;
-      const tvgId = channel.id || channel.ratingKey || `${index + 1}`;
-      const logo = channel.thumbnail || channel.thumb ? `${channel.thumbnail || channel.thumb}?X-Plex-Token=${plexToken}` : 'https://provider-static.plex.tv/static/images/plex-logo.png';
-      const streamUrl = channel.media && channel.media[0] && channel.media[0].url
-        ? `${channel.media[0].url}?X-Plex-Token=${plexToken}`
-        : (channel.streamUrl ? `${channel.streamUrl}?X-Plex-Token=${plexToken}` : null);
-
-      if (streamUrl) {
-        m3u += `#EXTINF:-1 tvg-id="${tvgId}" tvg-name="${name}" tvg-logo="${logo}",${name}\n${streamUrl}\n`;
-      }
-    });
-
-    if (m3u === `#EXTM3U url-tvg="https://epg.provider.plex.tv/grid?type=channel&X-Plex-Token=${plexToken}"\n`) {
-      console.log('No valid streams; using fallback');
-      return await generateFallbackPlaylist();
-    }
-
-    return m3u;
-  } catch (error) {
-    console.error('Error scraping channels:', error.message);
+  if (m3u === '#EXTM3U\n') {
+    console.log('No valid streams; falling back to iptv-org');
     return await generateFallbackPlaylist();
   }
+
+  return m3u;
 }
 
 async function generateFallbackPlaylist() {
@@ -114,10 +71,9 @@ async function generateFallbackPlaylist() {
 }
 
 async function main() {
-  const region = 'us';
-  const m3uContent = await scrapePlexChannels(region);
+  const m3uContent = await generatePlexPlaylist();
   await fs.writeFile('plex.m3u', m3uContent);
-  console.log('Playlist written to plex.m3u');
+  console.log('Playlist written to plex.m3u, channels:', (m3uContent.match(/#EXTINF:/g) || []).length);
 }
 
 main().catch(console.error);
