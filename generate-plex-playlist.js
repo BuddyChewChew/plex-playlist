@@ -46,6 +46,19 @@ async function generatePlexPlaylist() {
   const sampleId = Object.keys(channels)[0];
   console.log(`Sample channel (${sampleId}): ${JSON.stringify(channels[sampleId], null, 2)}`);
 
+  // Count channels with valid streams
+  let validStreams = 0;
+  for (const channelId in channels) {
+    const channel = channels[channelId];
+    const streamUrl = channel.url || channel.streamUrl || channel.stream || (channel.media && channel.media[0] && channel.media[0].url) || null;
+    if (streamUrl) validStreams++;
+  }
+  console.log(`Channels with valid streams: ${validStreams}/${Object.keys(channels).length}`);
+  if (validStreams === 0) {
+    console.log('No valid streams detected; falling back to iptv-org');
+    return await generateFallbackPlaylist();
+  }
+
   let m3u = '#EXTM3U\n';
   let channelCount = 0;
   for (const channelId in channels) {
