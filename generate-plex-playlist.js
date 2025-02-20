@@ -29,15 +29,20 @@ async function generatePlexPlaylist() {
   const channelsUrl = 'https://raw.githubusercontent.com/matthuisman/i.mjh.nz/refs/heads/master/Plex/.channels.json.gz';
   const channelsData = await fetchAndDecompress(channelsUrl);
 
-  if (!channelsData || !channelsData.regions || !channelsData.regions.us || !channelsData.regions.us.channels) {
-    console.log('No valid region channels data; falling back to iptv-org');
+  if (!channelsData) {
+    console.log('No valid data; falling back to iptv-org');
     return await generateFallbackPlaylist();
   }
 
-  const channels = channelsData.regions.us.channels;
-  console.log(`Found ${Object.keys(channels).length} channels`);
+  // Try regions.us.channels first, then fall back to channels
+  let channels = (channelsData.regions && channelsData.regions.us && channelsData.regions.us.channels) || channelsData.channels;
+  if (!channels) {
+    console.log('No channels found in regions.us or top-level; falling back to iptv-org');
+    return await generateFallbackPlaylist();
+  }
 
-  // Log a sample channel to inspect structure
+  console.log(`Found ${Object.keys(channels).length} channels`);
+  // Log a sample channel
   const sampleId = Object.keys(channels)[0];
   console.log(`Sample channel (${sampleId}): ${JSON.stringify(channels[sampleId], null, 2)}`);
 
@@ -48,7 +53,8 @@ async function generatePlexPlaylist() {
     const name = channel.name || `Plex Channel ${channelId}`;
     const tvgId = channelId;
     const logo = channel.logo || 'https://provider-static.plex.tv/static/images/plex-logo.png';
-    const streamUrl = channel.url || channel.streamUrl || (channel.media && channel.media[0] && channel.media[0].url) || null;
+    // Try multiple URL fields
+    const streamUrl = channel.url || channel.streamUrl || channel.stream || (channel.media && channel.media[0] && channel.media[0].url) || null;
 
     console.log(`Channel: ${name}, Stream URL: ${streamUrl || 'Not found'}`);
     if (streamUrl) {
