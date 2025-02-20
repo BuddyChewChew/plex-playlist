@@ -44,7 +44,6 @@ async function generatePlexPlaylist() {
     const name = channel.name || `Plex Channel ${channelId}`;
     const tvgId = channelId;
     const logo = channel.logo || 'https://provider-static.plex.tv/static/images/plex-logo.png';
-    // Try multiple possible URL fields
     const streamUrl = channel.url || channel.streamUrl || (channel.media && channel.media[0] && channel.media[0].url) || null;
 
     console.log(`Channel: ${name}, Stream URL: ${streamUrl || 'Not found'}`);
@@ -71,3 +70,20 @@ async function generateFallbackPlaylist() {
       const m3u = response.data;
       console.log('Fallback M3U fetched, channels found:', (m3u.match(/#EXTINF:/g) || []).length);
       return m3u;
+    } else {
+      console.error('Fallback fetch failed:', response.status);
+      return '#EXTM3U\n#EXTINF:-1 tvg-id="error" tvg-name="Error" tvg-logo="",Error\nhttp://example.com/error.m3u8';
+    }
+  } catch (error) {
+    console.error('Error fetching fallback:', error.message);
+    return '#EXTM3U\n#EXTINF:-1 tvg-id="error" tvg-name="Error" tvg-logo="",Error\nhttp://example.com/error.m3u8';
+  }
+}
+
+async function main() {
+  const m3uContent = await generatePlexPlaylist();
+  await fs.writeFile('plex.m3u', m3uContent);
+  console.log('Playlist written to plex.m3u, channels:', (m3uContent.match(/#EXTINF:/g) || []).length);
+}
+
+main().catch(error => console.error('Main error:', error.message));
