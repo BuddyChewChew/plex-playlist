@@ -10,8 +10,10 @@ async function fetchAndDecompress(url) {
 async function testStreamUrl(url) {
   try {
     const response = await axios.head(url, { timeout: 5000 });
+    console.log(`Tested ${url}: ${response.status}`);
     return response.status === 200;
-  } catch {
+  } catch (error) {
+    console.log(`Tested ${url}: ${error.response ? error.response.status : error.message}`);
     return false;
   }
 }
@@ -22,18 +24,17 @@ async function generatePlexPlaylist() {
   const channels = (channelsData.regions && channelsData.regions.us && channelsData.regions.us.channels) || channelsData.channels;
   console.log(`Found ${Object.keys(channels).length} channels from .channels.json.gz`);
 
+  // Base URL from earlier sniff—swap this if you find a new one
   const baseCdnUrl = 'https://plex-freqlive-plex-akamai.akamaized.net/channels/';
   const streamMap = {};
-  let tested = 0;
-  for (const channelId in channels) {
+  const channelIds = Object.keys(channels).slice(0, 5); // Test 5 to keep it quick
+  for (const channelId of channelIds) {
     const streamUrl = `${baseCdnUrl}${channelId}/master.m3u8`;
     if (await testStreamUrl(streamUrl)) {
       streamMap[channelId] = streamUrl;
     }
-    tested++;
-    if (tested % 100 === 0) console.log(`Tested ${tested}/${Object.keys(channels).length} channels`);
   }
-  console.log(`Found ${Object.keys(streamMap).length} valid stream URLs`);
+  console.log(`Found ${Object.keys(streamMap).length} valid stream URLs out of 5 tested`);
 
   let m3u = '#EXTM3U\n';
   let channelCount = 0;
