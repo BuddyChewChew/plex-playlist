@@ -1,20 +1,35 @@
 const axios = require('axios');
 const fs = require('fs').promises;
-const zlib = require('zlib'); // For decompressing gzip
+const zlib = require('zlib');
 
 async function fetchAndDecompress(url) {
-  console.log(`Fetching and decompressing: ${url}`);
+  console.log(`Fetching: ${url}`);
   try {
     const response = await axios.get(url, { responseType: 'arraybuffer' });
-    if (response.status === 200) {
-      const decompressed = zlib.gunzipSync(Buffer.from(response.data)).toString('utf8');
-      return JSON.parse(decompressed);
-    } else {
-      console.error(`Fetch failed: ${response.status}`);
+    console.log(`Fetch status: ${response.status}, size: ${response.data.length} bytes`);
+    if (response.status !== 200) {
+      throw new Error(`HTTP ${response.status}`);
+    }
+
+    const buffer = Buffer.from(response.data);
+    console.log(`Buffer length: ${buffer.length} bytes`);
+    const decompressed = zlib.gunzipSync(buffer).toString('utf8');
+    console.log(`Decompressed length: ${decompressed.length} chars`);
+
+    try {
+      const jsonData = JSON.parse(decompressed);
+      console.log(`JSON keys: ${Object.keys(jsonData)}`);
+      if (!jsonData.channels) {
+        throw new Error('No "channels" key in JSON');
+      }
+      return jsonData;
+    } catch (parseError) {
+      console.error(`JSON parse error: ${parseError.message}`);
+      console.log(`Raw decompressed sample: ${decompressed.substring(0, 100)}`);
       return null;
     }
   } catch (error) {
-    console.error(`Error fetching/decompressing: ${error.message}`);
+    console.error(`Error in fetch/decompress: ${error.message}`);
     return null;
   }
 }
@@ -24,14 +39,15 @@ async function generatePlexPlaylist() {
   const channelsData = await fetchAndDecompress(channelsUrl);
 
   if (!channelsData || !channelsData.channels) {
-    console.log('No valid channels data; falling back to iptv-org');
+    console.log('Failed to get valid channels; falling back to iptv-org');
     return await generateFallbackPlaylist();
   }
 
   const channels = channelsData.channels;
   console.log(`Found ${Object.keys(channels).length} channels`);
 
-  let m3u = '#EXTM3U\n'; // No url-tvg for simplicity; add later if needed
+  let m3u = '#EXTM3U\n';
+  let channelCount = 0;
   for (const channelId in channels) {
     const channel = channels[channelId];
     const name = channel.name || `Plex Channel ${channelId}`;
@@ -41,9 +57,11 @@ async function generatePlexPlaylist() {
 
     if (streamUrl) {
       m3u += `#EXTINF:-1 tvg-id="${tvgId}" tvg-name="${name}" tvg-logo="${logo}",${name}\n${streamUrl}\n`;
+      channelCount++;
     }
   }
 
+  console.log(`Wrote ${channelCount} channels to M3U`);
   if (m3u === '#EXTM3U\n') {
     console.log('No valid streams; falling back to iptv-org');
     return await generateFallbackPlaylist();
@@ -55,7 +73,7 @@ async function generatePlexPlaylist() {
 async function generateFallbackPlaylist() {
   console.log('Fetching fallback from iptv-org');
   try {
-    const response = await axios.get('https://raw.githubusercontent.com/matthuisman/i.mjh.nz/refs/heads/master/Plex/.channels.json.gz');
+    const response = await axios.get('https://raw.githubusercontent.com/iptv-org/iptv/master/streams/us_plex.m3u');
     if (response.status === 200) {
       const m3u = response.data;
       console.log('Fallback M3U fetched, channels found:', (m3u.match(/#EXTINF:/g) || []).length);
@@ -76,4 +94,4 @@ async function main() {
   console.log('Playlist written to plex.m3u, channels:', (m3uContent.match(/#EXTINF:/g) || []).length);
 }
 
-main().catch(console.error);
+main().catch(error => console.error('Main error:', error.message));
