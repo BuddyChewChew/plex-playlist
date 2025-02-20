@@ -24,10 +24,10 @@ async function generatePlexPlaylist() {
   const channels = (channelsData.regions && channelsData.regions.us && channelsData.regions.us.channels) || channelsData.channels;
   console.log(`Found ${Object.keys(channels).length} channels from .channels.json.gz`);
 
-  // Base URL from earlier sniff—swap this if you find a new one
-  const baseCdnUrl = 'https://plex-freqlive-plex-akamai.akamaized.net/channels/';
+  // Replace this with the base URL from your DevTools sniff
+  const baseCdnUrl = 'https://plex-freqlive-plex-akamai.akamaized.net/channels/'; // Placeholder—update this!
   const streamMap = {};
-  const channelIds = Object.keys(channels).slice(0, 5); // Test 5 to keep it quick
+  const channelIds = Object.keys(channels).slice(0, 5); // Test 5 for speed
   for (const channelId of channelIds) {
     const streamUrl = `${baseCdnUrl}${channelId}/master.m3u8`;
     if (await testStreamUrl(streamUrl)) {
