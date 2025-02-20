@@ -29,13 +29,17 @@ async function generatePlexPlaylist() {
   const channelsUrl = 'https://raw.githubusercontent.com/matthuisman/i.mjh.nz/refs/heads/master/Plex/.channels.json.gz';
   const channelsData = await fetchAndDecompress(channelsUrl);
 
-  if (!channelsData || !channelsData.channels) {
-    console.log('No valid channels data; falling back to iptv-org');
+  if (!channelsData || !channelsData.regions || !channelsData.regions.us || !channelsData.regions.us.channels) {
+    console.log('No valid region channels data; falling back to iptv-org');
     return await generateFallbackPlaylist();
   }
 
-  const channels = channelsData.channels;
+  const channels = channelsData.regions.us.channels;
   console.log(`Found ${Object.keys(channels).length} channels`);
+
+  // Log a sample channel to inspect structure
+  const sampleId = Object.keys(channels)[0];
+  console.log(`Sample channel (${sampleId}): ${JSON.stringify(channels[sampleId], null, 2)}`);
 
   let m3u = '#EXTM3U\n';
   let channelCount = 0;
