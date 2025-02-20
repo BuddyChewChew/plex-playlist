@@ -1,0 +1,34 @@
+name: Generate Plex Playlist
+
+on:
+  schedule:
+    - cron: '0 0 * * *' # Runs daily at midnight UTC
+  workflow_dispatch: # Allows manual trigger
+
+jobs:
+  generate-playlist:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '18'
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Generate Plex playlist
+        run: node generate-plex-playlist.js
+
+      - name: Commit and push playlist
+        run: |
+          git config user.name "GitHub Action"
+          git config user.email "action@github.com"
+          git add plex.m3u
+          git commit -m "Update Plex playlist" || echo "No changes to commit"
+          git push
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
