@@ -1,5 +1,6 @@
 const axios = require('axios');
 const fs = require('fs').promises;
+const puppeteer = require('puppeteer');
 
 async function fetchChannels(url) {
   console.log('Fetching channels...');
@@ -38,18 +39,17 @@ async function getPlexToken(countryCode = 'us') {
 }
 
 async function findStreamUrl(pageUrl, token) {
-  console.log(`Scraping: ${pageUrl}`);
+  console.log(`Scraping with puppeteer: ${pageUrl}`);
   try {
-    const response = await axios.get(pageUrl, {
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36',
-        'X-Plex-Token': token,
-      },
-      timeout: 10000, // Give it time to load
-    });
-    const html = response.data;
+    const browser = await puppeteer.launch({ headless: true });
+    const page = await browser.newPage();
+    await page.setExtraHTTPHeaders({ 'X-Plex-Token': token });
+    await page.goto(pageUrl, { waitUntil: 'networkidle2' }); // Wait for network activity to settle
+    const html = await page.content();
     const m3u8Matches = html.match(/https?:\/\/[^'"\s<>]+\.m3u8/g) || [];
     console.log(`Found ${m3u8Matches.length} .m3u8 URLs`);
+    await browser.close();
+
     for (const m3u8 of m3u8Matches) {
       const streamUrl = `${m3u8}?X-Plex-Token=${token}`;
       try {
@@ -66,7 +66,7 @@ async function findStreamUrl(pageUrl, token) {
     console.log(`No valid .m3u8 found in ${pageUrl}`);
     return null;
   } catch (error) {
-    console.log(`Error fetching ${pageUrl}: ${error.message}`);
+    console.log(`Error scraping ${pageUrl}: ${error.message}`);
     return null;
   }
 }
@@ -88,7 +88,7 @@ async function generatePlexPlaylist() {
   if (!token) throw new Error('Failed to obtain Plex token');
 
   const streamMap = {};
-  const channelsToTest = channelsData.slice(0, 10);
+  const channelsToTest = channelsData.slice(0, 5); // Test 5 to save time initially
   for (const channel of channelsToTest) {
     const streamUrl = await findStreamUrl(channel.Link, token);
     if (streamUrl) {
