@@ -1,14 +1,55 @@
+const axios = require('axios');
+const fs = require('fs').promises;
+
+async function fetchChannels(url) {
+  console.log('Fetching channels...');
+  try {
+    const response = await axios.get(url);
+    console.log('Channels fetched');
+    return response.data;
+  } catch (error) {
+    throw new Error(`Failed to fetch channels: ${error.message}`);
+  }
+}
+
+async function getPlexToken(countryCode = 'us') {
+  console.log('Getting Plex token...');
+  const headers = {
+    'Accept': 'application/json',
+    'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36',
+    'X-Forwarded-For': countryCode === 'us' ? '185.236.200.172' : undefined,
+  };
+  const params = {
+    'X-Plex-Product': 'Plex Web',
+    'X-Plex-Version': '4.126.1',
+    'X-Plex-Client-Identifier': Math.random().toString(36).substring(2),
+  };
+  try {
+    const response = await axios.post('https://clients.plex.tv/api/v2/users/anonymous', null, { headers, params });
+    if (response.status === 200 || response.status === 201) {
+      console.log('Token fetched successfully');
+      return response.data.authToken;
+    }
+    throw new Error(`Unexpected status: ${response.status}`);
+  } catch (error) {
+    console.error(`Token fetch failed: ${error.message}`);
+    return null;
+  }
+}
+
 async function findStreamUrl(pageUrl, token) {
+  console.log(`Scraping: ${pageUrl}`);
   try {
     const response = await axios.get(pageUrl, {
       headers: {
         'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36',
         'X-Plex-Token': token,
       },
+      timeout: 10000, // Give it time to load
     });
     const html = response.data;
-    // Broader regex to catch more .m3u8 URLs
     const m3u8Matches = html.match(/https?:\/\/[^'"\s<>]+\.m3u8/g) || [];
+    console.log(`Found ${m3u8Matches.length} .m3u8 URLs`);
     for (const m3u8 of m3u8Matches) {
       const streamUrl = `${m3u8}?X-Plex-Token=${token}`;
       try {
@@ -47,7 +88,7 @@ async function generatePlexPlaylist() {
   if (!token) throw new Error('Failed to obtain Plex token');
 
   const streamMap = {};
-  const channelsToTest = channelsData.slice(0, 10); // Test 10 to get a better sample
+  const channelsToTest = channelsData.slice(0, 10);
   for (const channel of channelsToTest) {
     const streamUrl = await findStreamUrl(channel.Link, token);
     if (streamUrl) {
@@ -84,3 +125,18 @@ async function generatePlexPlaylist() {
 
   return m3u;
 }
+
+async function main() {
+  console.log('Starting...');
+  try {
+    const m3uContent = await generatePlexPlaylist();
+    console.log('Writing file...');
+    await fs.writeFile('plex.m3u', m3uContent);
+    console.log('Playlist written to plex.m3u, channels:', (m3uContent.match(/#EXTINF:/g) || []).length);
+  } catch (error) {
+    console.error('Main error:', error.message);
+  }
+  console.log('Done.');
+}
+
+main();
