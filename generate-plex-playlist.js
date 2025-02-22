@@ -19,7 +19,7 @@ async function testStreamUrl(url) {
 }
 
 async function generatePlexPlaylist() {
-  const channelsUrl = 'https://raw.githubusercontent.com/matthuisman/i.mjh.nz/refs/heads/master/Plex/.channels.json.gz';
+  const channelsUrl = 'https://raw.githubusercontent.com/BuddyChewChew/free-iptv-channels/refs/heads/main/plex/channels.json';
   const channelsData = await fetchAndDecompress(channelsUrl);
   const channels = (channelsData.regions && channelsData.regions.us && channelsData.regions.us.channels) || channelsData.channels;
   console.log(`Found ${Object.keys(channels).length} channels from .channels.json.gz`);
