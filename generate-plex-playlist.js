@@ -13,109 +13,79 @@ async function getPlexToken(countryCode = 'us') {
     'Origin': 'https://app.plex.tv',
     'Referer': 'https://app.plex.tv/',
     'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36',
+    'X-Forwarded-For': countryCode === 'us' ? '185.236.200.172' : undefined,
   };
 
   const params = {
     'X-Plex-Product': 'Plex Web',
     'X-Plex-Version': '4.126.1',
-    'X-Plex-Client-Identifier': Math.random().toString(36).substring(2), // Simple UUID substitute
+    'X-Plex-Client-Identifier': Math.random().toString(36).substring(2),
     'X-Plex-Language': 'en',
     'X-Plex-Platform': 'Chrome',
-    'X-Plex-Platform-Version': '123.0',
-    'X-Plex-Features': 'external-media,indirect-media,hub-style-list',
-    'X-Plex-Model': 'hosted',
-    'X-Plex-Device': 'Linux',
-    'X-Plex-Device-Name': 'Chrome',
-    'X-Plex-Device-Screen-Resolution': '1282x929,1920x1080',
   };
-
-  const xForwardedForMap = {
-    'us': '185.236.200.172',
-    'ca': '192.206.151.131',
-    'uk': '178.238.11.6',
-  };
-
-  if (xForwardedForMap[countryCode]) {
-    headers['X-Forwarded-For'] = xForwardedForMap[countryCode];
-  }
 
   const url = 'https://clients.plex.tv/api/v2/users/anonymous';
-  try {
-    const response = await axios.post(url, null, { headers, params });
-    if (response.status === 200 || response.status === 201) {
-      const token = response.data.authToken;
-      console.log('Plex Token:', token);
-      return token;
-    }
-    console.log('Error fetching token:', response.status);
-    return null;
-  } catch (error) {
-    console.error('Token fetch error:', error.message);
-    return null;
-  }
+  const response = await axios.post(url, null, { headers, params });
+  return response.status === 200 || response.status === 201 ? response.data.authToken : null;
 }
 
-async function testStreamUrl(url, token) {
+async function findStreamUrl(pageUrl, token) {
   try {
-    const response = await axios.head(url, {
-      timeout: 5000,
-      headers: { 'X-Plex-Token': token },
+    const response = await axios.get(pageUrl, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36',
+        'X-Plex-Token': token,
+      },
     });
-    console.log(`Tested ${url}: ${response.status}`);
-    return response.status === 200;
+    const html = response.data;
+    const m3u8Match = html.match(/https?:\/\/[^\s"]+\.m3u8/);
+    if (m3u8Match) {
+      const streamUrl = `${m3u8Match[0]}?X-Plex-Token=${token}`;
+      const test = await axios.head(streamUrl, { timeout: 5000, headers: { 'X-Plex-Token': token } });
+      if (test.status === 200) {
+        console.log(`Found valid stream: ${streamUrl}`);
+        return streamUrl;
+      }
+    }
+    console.log(`No valid .m3u8 found in ${pageUrl}`);
+    return null;
   } catch (error) {
-    console.log(`Tested ${url}: ${error.response ? error.response.status : error.message}`);
-    return false;
+    console.log(`Error fetching ${pageUrl}: ${error.message}`);
+    return null;
   }
 }
 
 async function generatePlexPlaylist() {
   const channelsUrl = 'https://raw.githubusercontent.com/BuddyChewChew/free-iptv-channels/refs/heads/main/plex/channels.json';
-  let channelsData;
-  try {
-    channelsData = await fetchChannels(channelsUrl);
-  } catch (error) {
-    throw new Error(`Failed to fetch channels.json: ${error.message}`);
-  }
+  const channelsData = await fetchChannels(channelsUrl);
+  console.log('First channel sample:', JSON.stringify(channelsData[0], null, 2));
 
-  console.log('Raw channelsData:', channelsData);
-
-  if (!Array.isArray(channelsData)) {
-    throw new Error('Invalid channels data: Expected an array in channels.json');
-  }
-
-  console.log(`Found ${channelsData.length} channels from channels.json`);
+  if (!Array.isArray(channelsData)) throw new Error('Invalid channels data: Expected an array');
+  console.log(`Found ${channelsData.length} channels`);
 
   const token = await getPlexToken('us');
-  if (!token) {
-    throw new Error('Failed to obtain Plex token');
-  }
+  if (!token) throw new Error('Failed to obtain Plex token');
 
-  // Base URL inspired by GAS script’s transformation
-  const baseCdnUrl = 'https://epg.provider.plex.tv/library/parts/'; // Placeholder—needs validation
   const streamMap = {};
-
-  // Test first 5 channels
   const channelsToTest = channelsData.slice(0, 5);
   for (const channel of channelsToTest) {
-    const channelId = channel.Link.split('/').pop(); // e.g., "go-wild"
-    const streamUrl = `${baseCdnUrl}${channelId}/master.m3u8?X-Plex-Token=${token}`;
-    if (await testStreamUrl(streamUrl, token)) {
-      streamMap[channelId] = streamUrl;
+    const streamUrl = await findStreamUrl(channel.Link, token);
+    if (streamUrl) {
+      streamMap[channel.Link] = streamUrl;
     }
   }
-  console.log(`Found ${Object.keys(streamMap).length} valid stream URLs out of 5 tested`);
+  console.log(`Found ${Object.keys(streamMap).length} valid streams out of 5 tested`);
 
   let m3u = '#EXTM3U\n';
   let channelCount = 0;
   for (const channel of channelsData) {
-    const channelId = channel.Link.split('/').pop();
-    const name = channel.Title || `Plex Channel ${channelId}`;
+    const name = channel.Title || `Plex Channel ${channel.Link.split('channel=')[1] || 'Unknown'}`;
     const logo = 'https://provider-static.plex.tv/static/images/plex-logo.png';
     const group = channel.Genre || 'Uncategorized';
-    const streamUrl = streamMap[channelId];
+    const streamUrl = streamMap[channel.Link];
 
     if (streamUrl) {
+      const channelId = channel.Link.split('channel=')[1] || channel.Link.split('/').pop();
       m3u += `#EXTINF:-1 tvg-id="${channelId}" tvg-name="${name}" tvg-logo="${logo}" group-title="${group}",${name}\n${streamUrl}\n`;
       channelCount++;
     }
